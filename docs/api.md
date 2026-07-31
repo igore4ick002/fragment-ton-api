@@ -30,6 +30,7 @@ Error object format:
 | `transfer_gift()` | `owned_item_slug`, `recipient_username`, `anonymous=True` | result dict | Transfers an owned collectible gift to a Telegram user. |
 | `buy_and_deliver_gift()` | `item_slug`, `bid_amount`, `recipient_username`, `anonymous=True` | result dict | Buys a gift and then transfers it to the recipient. |
 | `get_balance_ton()` | none | `(balance, error)` | Returns wallet balance in TON or an error string. |
+| `get_balance()` | none | `BalanceResult` | Returns wallet balance as a typed dataclass. |
 | `close()` | none | `None` | Closes HTTP and TON lite client sessions. |
 | `FragmentCatalog(...)` | `fragment_cookies=None` | catalog | Creates read-only catalog helper. |
 | `list_collections()` | none | `list[dict]` | Lists available gift collections. |
@@ -47,3 +48,13 @@ Error object format:
 | `FragmentPaymentError` | `fragment_payment_error` | Stars, Premium, or gift purchase problems. |
 | `FragmentTransferError` | `fragment_transfer_error` | Gift transfer problems. |
 | `FragmentCatalogError` | `fragment_catalog_error` | Catalog parameter or parsing problems. |
+
+## Public Types
+
+| Type | Kind | Description |
+| --- | --- | --- |
+| `PaymentResult` | `TypedDict` | Return type for payment and transfer methods. |
+| `FragmentErrorDict` | `TypedDict` | Structured error payload. |
+| `GiftItem` | `TypedDict` | Catalog gift item. |
+| `CollectionItem` | `TypedDict` | Catalog collection item. |
+| `BalanceResult` | `dataclass` | Typed balance result with `balance` and `error`. |

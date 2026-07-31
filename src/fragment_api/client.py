@@ -56,6 +56,7 @@ from .exceptions import (
     error_result,
     success_result,
 )
+from .types import BalanceResult, PaymentResult
 
 FRAGMENT_BASE = "https://fragment.com"
 TONCENTER_API = "https://toncenter.com/api/v2"
@@ -470,7 +471,7 @@ class FragmentClient:
             except Exception:
                 return 0
 
-    async def buy_stars(self, username: str, quantity: int, anonymous: bool = True) -> dict:
+    async def buy_stars(self, username: str, quantity: int, anonymous: bool = True) -> PaymentResult:
         """
         Покупает `quantity` звёзд для @username через Fragment, оплата с TON-кошелька.
         anonymous=True — получатель не увидит, кто подарил (show_sender=0).
@@ -525,7 +526,7 @@ class FragmentClient:
 
         return success_result()
 
-    async def buy_premium_gift(self, username: str, months: int, anonymous: bool = True) -> dict:
+    async def buy_premium_gift(self, username: str, months: int, anonymous: bool = True) -> PaymentResult:
         """
         Покупает Telegram Premium Gift для @username через Fragment/TON.
         months: 3, 6 или 12.
@@ -610,7 +611,7 @@ class FragmentClient:
             break
         return link_result
 
-    async def buy_gift(self, item_slug: str, bid_amount) -> dict:
+    async def buy_gift(self, item_slug: str, bid_amount) -> PaymentResult:
         """Покупает конкретный лот (item_slug вида 'chillflame-109284') по цене bid_amount TON.
         Подарок приходит на аккаунт, привязанный к этому кошельку (Fragment не поддерживает
         доставку сразу на чужой username при покупке — только через transfer_gift ниже)."""
@@ -643,7 +644,7 @@ class FragmentClient:
             })
         return success_result()
 
-    async def transfer_gift(self, owned_item_slug: str, recipient_username: str, anonymous: bool = True) -> dict:
+    async def transfer_gift(self, owned_item_slug: str, recipient_username: str, anonymous: bool = True) -> PaymentResult:
         """Передаёт УЖЕ купленный (лежащий на этом аккаунте) подарок другому @username.
         Полностью через Fragment/TON — initNftTransferRequest ищет получателя, getNftTransferLink
         отдаёт транзакцию передачи для подписи (тот же механизм, что при покупке)."""
@@ -697,7 +698,7 @@ class FragmentClient:
             })
         return success_result()
 
-    async def buy_and_deliver_gift(self, item_slug: str, bid_amount, recipient_username: str, anonymous: bool = True) -> dict:
+    async def buy_and_deliver_gift(self, item_slug: str, bid_amount, recipient_username: str, anonymous: bool = True) -> PaymentResult:
         """Покупает лот и сразу передаёт указанному @username — оба шага через Fragment/TON."""
         buy_result = await self.buy_gift(item_slug, bid_amount)
         if not buy_result["success"]:
@@ -745,6 +746,11 @@ class FragmentClient:
                 return int(data["result"]) / 1_000_000_000, None
         except Exception as ex:
             return None, str(ex)
+
+    async def get_balance(self) -> BalanceResult:
+        """Return wallet balance as a typed dataclass."""
+        balance, error = await self.get_balance_ton()
+        return BalanceResult(balance=balance, error=error)
 
     async def close(self):
         if self._session:

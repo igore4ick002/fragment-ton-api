@@ -18,6 +18,7 @@ from .exceptions import (
     FragmentTransferError,
     FragmentWalletError,
 )
+from .types import BalanceResult, CollectionItem, FragmentErrorDict, GiftItem, PaymentResult
 
 __all__ = [
     "FragmentClient",
@@ -29,6 +30,11 @@ __all__ = [
     "FragmentRecipientError",
     "FragmentTransferError",
     "FragmentWalletError",
+    "FragmentErrorDict",
+    "PaymentResult",
+    "GiftItem",
+    "CollectionItem",
+    "BalanceResult",
     "FRAGMENT_BASE",
     "TONCENTER_API",
     "WALLET_V4R2",
@@ -36,4 +42,4 @@ __all__ = [
     "FragmentCatalog",
 ]
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"

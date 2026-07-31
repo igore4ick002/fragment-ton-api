@@ -12,6 +12,8 @@ The client signs TON transactions locally. Your wallet mnemonic is not sent to F
 - PyPI: https://pypi.org/project/fragment-ton-api/
 - API reference: https://github.com/igore4ick002/fragment-ton-api/blob/main/docs/api.md
 - Examples: https://github.com/igore4ick002/fragment-ton-api/tree/main/examples
+- Authentication guide: https://github.com/igore4ick002/fragment-ton-api/blob/main/docs/auth.md
+- Error codes: https://github.com/igore4ick002/fragment-ton-api/blob/main/docs/errors.md
 
 ## Installation
 
@@ -278,5 +280,8 @@ This is an unofficial project. It is not affiliated with Telegram, Fragment, TON
 ## More
 
 - API reference: [docs/api.md](docs/api.md)
+- Authentication guide: [docs/auth.md](docs/auth.md)
+- Error codes: [docs/errors.md](docs/errors.md)
+- Example scenarios: [docs/examples.md](docs/examples.md)
 - Ready-to-run examples: [examples/](examples/)
 - Basic tests: [tests/](tests/)

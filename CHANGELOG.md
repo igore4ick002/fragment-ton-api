@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- Added authentication, error code, and example scenario docs.
+- Added GitHub Actions for ruff, pytest, build, twine check, and gitleaks.
+- Added pytest async tests for gift purchase and delivery flow.
+- Added public result types: `PaymentResult`, `GiftItem`, `CollectionItem`, and `BalanceResult`.
+- Added typed `get_balance()` helper.
+- Added ruff configuration and development dependencies.
+
 ## 0.1.3
 
 - Added ready-to-run examples for Stars, Premium gifts, gift listing, gift purchase, and gift transfer.

@@ -6,6 +6,7 @@ from typing import Optional
 import aiohttp
 
 from .exceptions import FragmentCatalogError
+from .types import CollectionItem, GiftItem
 
 FRAGMENT_BASE = "https://fragment.com"
 
@@ -28,7 +29,7 @@ def _absolute_url(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
-def _parse_items(html: str, collection: str, limit: int) -> list[dict]:
+def _parse_items(html: str, collection: str, limit: int) -> list[GiftItem]:
     items = []
     for match in _ITEM_BLOCK_RE.finditer(html):
         if len(items) >= limit:
@@ -66,7 +67,7 @@ class FragmentCatalog:
             headers["Cookie"] = self.fragment_cookies
         return headers
 
-    async def list_collections(self) -> list[dict]:
+    async def list_collections(self) -> list[CollectionItem]:
         async with aiohttp.ClientSession(headers=self._headers()) as session:
             async with session.get(f"{FRAGMENT_BASE}/gifts") as response:
                 response.raise_for_status()
@@ -88,7 +89,7 @@ class FragmentCatalog:
                 })
         return result
 
-    async def list_gifts(self, collection_slug: str, limit: int = 60, sort: str = "price") -> list[dict]:
+    async def list_gifts(self, collection_slug: str, limit: int = 60, sort: str = "price") -> list[GiftItem]:
         """Return currently available fixed-price gifts from one collection."""
         if not 1 <= limit <= 200:
             raise FragmentCatalogError("limit must be between 1 and 200")
