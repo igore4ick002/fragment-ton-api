@@ -4,12 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fragment-ton-api"
-version = "0.1.0"
+version = "0.1.1"
 description = "Unofficial async client for Fragment.com, TON payments and Telegram gifts"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "FRAGA" }]
+authors = [
+    { name = "Игорь", email = "igor.ignatenko.10@mail.ru" }
+]
 dependencies = [
     "aiohttp>=3.9",
     "tonsdk>=1.0.15",
@@ -22,6 +24,11 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Framework :: AsyncIO",
 ]
+
+[project.urls]
+Homepage = "https://github.com/igore4ick002/fragment-ton-api"
+Documentation = "https://github.com/igore4ick002/fragment-ton-api#readme"
+Issues = "https://github.com/igore4ick002/fragment-ton-api/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fragment_api"]
