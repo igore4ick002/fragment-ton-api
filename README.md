@@ -1,21 +1,23 @@
 # fragment-ton-api
 
-Неофициальный асинхронный Python-клиент для Fragment.com и TON. Клиент подписывает TON-транзакции локально: мнемоника не отправляется на Fragment или сторонний сервер.
+Unofficial async Python client for Fragment.com, TON payments, Telegram Stars, Telegram Premium gifts, and collectible Telegram gifts.
 
-## Ссылки
+The client signs TON transactions locally. Your wallet mnemonic is not sent to Fragment or to any third-party server.
+
+## Links
 
 - GitHub: https://github.com/igore4ick002/fragment-ton-api
-- Документация: https://github.com/igore4ick002/fragment-ton-api#readme
+- Documentation: https://github.com/igore4ick002/fragment-ton-api#readme
 - Issues: https://github.com/igore4ick002/fragment-ton-api/issues
 - PyPI: https://pypi.org/project/fragment-ton-api/
 
-## Установка
+## Installation
 
 ```bash
 pip install fragment-ton-api
 ```
 
-## Подключение
+## Basic Usage
 
 ```python
 import asyncio
@@ -24,13 +26,13 @@ from fragment_api import FragmentClient
 
 async def main():
     client = FragmentClient(
-        mnemonic="слово1 слово2 ... слово24",
-        toncenter_api_key="API_KEY или None",
+        mnemonic="word1 word2 ... word24",
+        toncenter_api_key="API_KEY or None",
         fragment_cookies="stel_ssid=...; stel_token=...",
     )
     try:
         await client.connect_wallet()
-        # операции Fragment здесь
+        # Fragment operations go here.
     finally:
         await client.close()
 
@@ -38,14 +40,14 @@ async def main():
 asyncio.run(main())
 ```
 
-Параметры `FragmentClient`:
+`FragmentClient` parameters:
 
-- `mnemonic` — ровно 24 слова TON-кошелька;
-- `toncenter_api_key` — необязательный ключ TonCenter, нужен для некоторых операций кошелька v4r2;
-- `wallet_version` — `"v5r1"` по умолчанию или `"v4r2"`;
-- `fragment_cookies` — cookie авторизованной Telegram-сессии на fragment.com. Без неё Fragment иногда возвращает `need_verify`.
+- `mnemonic`: exactly 24 words for the TON wallet.
+- `toncenter_api_key`: optional TonCenter API key, useful for some v4r2 wallet operations.
+- `wallet_version`: `"v5r1"` by default, or `"v4r2"`.
+- `fragment_cookies`: cookies from an authorized Telegram session on fragment.com. Without cookies, Fragment may return `need_verify`.
 
-## 1. Покупка Telegram Stars
+## 1. Buy Telegram Stars
 
 ```python
 result = await client.buy_stars(
@@ -56,14 +58,14 @@ result = await client.buy_stars(
 print(result)
 ```
 
-Параметры:
+Parameters:
 
-- `username` — Telegram username получателя, с `@` или без него;
-- `quantity` — количество Stars;
-- `anonymous=True` — получатель не увидит отправителя;
-- `anonymous=False` — отправитель будет виден.
+- `username`: recipient Telegram username, with or without `@`.
+- `quantity`: number of Telegram Stars to buy.
+- `anonymous=True`: the recipient will not see the sender.
+- `anonymous=False`: the sender will be visible.
 
-Успешный ответ:
+Successful response:
 
 ```json
 {
@@ -72,18 +74,18 @@ print(result)
 }
 ```
 
-Ответ с ошибкой:
+Error response:
 
 ```json
 {
   "success": false,
-  "error": "описание ошибки Fragment"
+  "error": "Fragment error description"
 }
 ```
 
-Метод находит пользователя, создаёт платёж, подписывает TON-транзакцию, отправляет её в сеть и подтверждает платёж в Fragment.
+The method finds the user, creates the payment, signs the TON transaction, sends it to the network, and confirms the payment in Fragment.
 
-## 2. Покупка Premium-подарка
+## 2. Buy Telegram Premium Gifts
 
 ```python
 result = await client.buy_premium_gift(
@@ -94,13 +96,13 @@ result = await client.buy_premium_gift(
 print(result)
 ```
 
-Параметры:
+Parameters:
 
-- `username` — получатель Premium;
-- `months` — обычно `3`, `6` или `12` месяцев;
-- `anonymous` — показывать ли отправителя подарка.
+- `username`: Premium gift recipient.
+- `months`: usually `3`, `6`, or `12`.
+- `anonymous`: whether to hide the sender.
 
-Ответ имеет такой же формат:
+Response format:
 
 ```json
 {
@@ -109,9 +111,9 @@ print(result)
 }
 ```
 
-## 3. Получение списка коллекций и подарков
+## 3. List Gift Collections and Gifts
 
-Для каталога кошелёк не нужен:
+The catalog does not require a wallet:
 
 ```python
 from fragment_api import FragmentCatalog
@@ -121,7 +123,7 @@ collections = await catalog.list_collections()
 print(collections)
 ```
 
-Коллекции:
+Collection format:
 
 ```json
 [
@@ -133,7 +135,7 @@ print(collections)
 ]
 ```
 
-Получение доступных подарков с фиксированной ценой:
+Get available fixed-price gifts:
 
 ```python
 gifts = await catalog.list_gifts(
@@ -143,7 +145,7 @@ gifts = await catalog.list_gifts(
 )
 ```
 
-Каждый подарок:
+Gift item format:
 
 ```json
 {
@@ -158,9 +160,11 @@ gifts = await catalog.list_gifts(
 }
 ```
 
-Именно значение `slug` передаётся в методы покупки и передачи. Сейчас каталог возвращает доступные fixed-price лоты, а не аукционные лоты.
+Use the `slug` value as `item_slug` or `owned_item_slug` in purchase and transfer methods.
 
-## 4. Покупка NFT-подарка по item_slug
+Current catalog support is focused on fixed-price listings, not auctions.
+
+## 4. Buy an NFT Gift by `item_slug`
 
 ```python
 result = await client.buy_gift(
@@ -170,12 +174,12 @@ result = await client.buy_gift(
 print(result)
 ```
 
-Параметры:
+Parameters:
 
-- `item_slug` — slug конкретного лота из `list_gifts()`;
-- `bid_amount` — цена покупки в TON, лучше передавать строкой.
+- `item_slug`: concrete listing slug from `list_gifts()`.
+- `bid_amount`: purchase amount in TON. Passing it as a string is recommended.
 
-Пример ответа:
+Example response:
 
 ```json
 {
@@ -184,9 +188,9 @@ print(result)
 }
 ```
 
-После успешной покупки подарок поступает на кошелёк, подключённый к `FragmentClient`.
+After a successful purchase, the gift is assigned to the wallet connected to `FragmentClient`.
 
-## 5. Передача купленного подарка пользователю
+## 5. Transfer a Purchased Gift to a User
 
 ```python
 result = await client.transfer_gift(
@@ -197,15 +201,15 @@ result = await client.transfer_gift(
 print(result)
 ```
 
-Параметры:
+Parameters:
 
-- `owned_item_slug` — slug уже купленного подарка;
-- `recipient_username` — Telegram username получателя;
-- `anonymous` — скрыть или показать отправителя.
+- `owned_item_slug`: slug of an already purchased gift.
+- `recipient_username`: Telegram username of the recipient.
+- `anonymous`: whether to hide the sender.
 
-Метод сначала находит получателя в Fragment, затем создаёт транзакцию передачи, подписывает её TON-кошельком и подтверждает передачу.
+The method finds the recipient in Fragment, creates the transfer transaction, signs it with the TON wallet, and confirms the transfer.
 
-## 6. Покупка и последующая передача одним методом
+## 6. Buy and Deliver a Gift in One Call
 
 ```python
 result = await client.buy_and_deliver_gift(
@@ -217,45 +221,50 @@ result = await client.buy_and_deliver_gift(
 print(result)
 ```
 
-Метод выполняет два шага:
+The method performs two steps:
 
-1. покупает подарок на подключённый кошелёк;
-2. передаёт этот подарок указанному Telegram-пользователю.
+1. Buys the gift for the connected wallet.
+2. Transfers the gift to the selected Telegram user.
 
-Если покупка прошла, а передача не прошла, метод вернёт ошибку передачи. В таком случае подарок может уже находиться на кошельке отправителя — повторную покупку делать нельзя, сначала проверь передачу через `transfer_gift()`.
+If purchase succeeds but transfer fails, the gift may already be on the sender wallet. Do not buy it again blindly; retry delivery with `transfer_gift()` first.
 
-## 7. Проверка баланса TON
+## 7. Check TON Balance
 
 ```python
 balance, error = await client.get_balance_ton()
 
 if error:
-    print("Ошибка:", error)
+    print("Error:", error)
 else:
-    print("Баланс:", balance, "TON")
+    print("Balance:", balance, "TON")
 ```
 
-Успешный результат:
+Successful result:
 
 ```python
 (12.345, None)
 ```
 
-При ошибке:
+Error result:
 
 ```python
-(None, "описание ошибки")
+(None, "error description")
 ```
 
-Перед покупками нужно проверить, что баланса хватает не только на цену подарка, но и на комиссии сети TON.
+Before buying anything, make sure the wallet has enough TON for the gift price and network fees.
 
-## Важная безопасность
+## Security
 
-Никогда не публикуйте в GitHub, README или исходниках:
+Never publish these values in GitHub, README files, examples, logs, screenshots, or issue reports:
 
-- 24 слова TON-мнемоники;
-- Fragment cookies;
-- TonCenter API key;
-- `.env` и базы данных.
+- 24-word TON wallet mnemonic.
+- Fragment cookies.
+- TonCenter API key.
+- PyPI tokens.
+- `.env` files and local databases.
 
-Клиент использует web-endpoint'ы Fragment, а не официальный стабильный публичный API. Fragment может изменить HTML, методы или требования к авторизации.
+This package uses Fragment web endpoints, not an official stable public Fragment API. Fragment may change HTML, endpoints, or authorization requirements at any time.
+
+## Disclaimer
+
+This is an unofficial project. It is not affiliated with Telegram, Fragment, TON Foundation, or PyPI.
