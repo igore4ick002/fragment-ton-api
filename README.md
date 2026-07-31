@@ -2,6 +2,13 @@
 
 Неофициальный асинхронный Python-клиент для Fragment.com и TON. Клиент подписывает TON-транзакции локально: мнемоника не отправляется на Fragment или сторонний сервер.
 
+## Ссылки
+
+- GitHub: https://github.com/igore4ick002/fragment-ton-api
+- Документация: https://github.com/igore4ick002/fragment-ton-api#readme
+- Issues: https://github.com/igore4ick002/fragment-ton-api/issues
+- PyPI: https://pypi.org/project/fragment-ton-api/
+
 ## Установка
 
 ```bash

@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement for fragment-ton-api
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: request
+    attributes:
+      label: What should be added?
+      description: Describe the API or behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Explain how this would be used by a developer.
+    validations:
+      required: true

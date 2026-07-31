@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a problem with fragment-ton-api
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Show the smallest code example or steps that reproduce the problem.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: "0.1.1"
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output
+      description: Paste traceback or Fragment error response. Do not paste mnemonics, cookies, tokens, or private keys.
+      render: text

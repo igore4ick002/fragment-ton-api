@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/igore4ick002/fragment-ton-api#readme
+    about: Read usage examples for Stars, Premium gifts, NFT gifts, transfers, and TON balance.
+  - name: PyPI package
+    url: https://pypi.org/project/fragment-ton-api/
+    about: Install the published package from PyPI.
