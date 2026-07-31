@@ -5,6 +5,8 @@ from typing import Optional
 
 import aiohttp
 
+from .exceptions import FragmentCatalogError
+
 FRAGMENT_BASE = "https://fragment.com"
 
 _COLLECTION_BLOCK_RE = re.compile(
@@ -12,7 +14,7 @@ _COLLECTION_BLOCK_RE = re.compile(
 )
 _COLLECTION_NAME_RE = re.compile(r'tm-main-filters-name">([^<]+)<')
 _ITEM_BLOCK_RE = re.compile(
-    r'<a href="(/gift/([a-z0-9]+)-(\d+))[^"]*"[^>]*class="tm-grid-item">(.*?)</a>', re.DOTALL
+    r'<a href="(/gift/([a-z0-9-]+)-(\d+))[^"]*"[^>]*class="tm-grid-item">(.*?)</a>', re.DOTALL
 )
 _IMG_RE = re.compile(r'<img src="([^"]+)"')
 _PRICE_RE = re.compile(r'tm-grid-item-value[^>]*>([\d,]+)<')
@@ -89,9 +91,9 @@ class FragmentCatalog:
     async def list_gifts(self, collection_slug: str, limit: int = 60, sort: str = "price") -> list[dict]:
         """Return currently available fixed-price gifts from one collection."""
         if not 1 <= limit <= 200:
-            raise ValueError("limit must be between 1 and 200")
+            raise FragmentCatalogError("limit must be between 1 and 200")
         if sort not in {"price", "recent"}:
-            raise ValueError("sort must be 'price' or 'recent'")
+            raise FragmentCatalogError("sort must be 'price' or 'recent'")
         url = f"{FRAGMENT_BASE}/gifts/{collection_slug}?sort={sort}&filter=sale"
         async with aiohttp.ClientSession(headers=self._headers()) as session:
             async with session.get(url) as response:

@@ -6,13 +6,29 @@ from .client import (
     WALLET_V4R2,
     WALLET_V5R1,
     FragmentClient,
-    FragmentError,
 )
 from .catalog import FragmentCatalog
+from .exceptions import (
+    FragmentAPIError,
+    FragmentAuthError,
+    FragmentCatalogError,
+    FragmentError,
+    FragmentPaymentError,
+    FragmentRecipientError,
+    FragmentTransferError,
+    FragmentWalletError,
+)
 
 __all__ = [
     "FragmentClient",
     "FragmentError",
+    "FragmentAPIError",
+    "FragmentAuthError",
+    "FragmentCatalogError",
+    "FragmentPaymentError",
+    "FragmentRecipientError",
+    "FragmentTransferError",
+    "FragmentWalletError",
     "FRAGMENT_BASE",
     "TONCENTER_API",
     "WALLET_V4R2",
@@ -20,4 +36,4 @@ __all__ = [
     "FragmentCatalog",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.3"

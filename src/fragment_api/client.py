@@ -47,14 +47,21 @@ from typing import Optional, Tuple
 
 import aiohttp
 
+from .exceptions import (
+    FragmentAuthError,
+    FragmentError,
+    FragmentPaymentError,
+    FragmentRecipientError,
+    FragmentTransferError,
+    error_result,
+    success_result,
+)
+
 FRAGMENT_BASE = "https://fragment.com"
 TONCENTER_API = "https://toncenter.com/api/v2"
 
 WALLET_V4R2 = "v4r2"
 WALLET_V5R1 = "v5r1"
-
-class FragmentError(Exception):
-    pass
 
 
 def _lenient_b64decode(s: str) -> bytes:
@@ -484,7 +491,7 @@ class FragmentClient:
         if init_result.get("need_ton"):
             raise FragmentError("Fragment не подтвердил кошелёк (need_ton) — проверьте connect_wallet()")
         if init_result.get("error"):
-            return {"success": False, "error": init_result["error"]}
+            return error_result(init_result["error"], default_code=FragmentPaymentError)
 
         req_id = init_result["req_id"]
 
@@ -496,12 +503,9 @@ class FragmentClient:
             "device": json.dumps(self._device),
         })
         if link_result.get("need_verify"):
-            return {"success": False, "error": (
-                "Fragment требует вход через Telegram-аккаунт на сайте (это не TON-кошелёк) — "
-                "настройте сессию входа в /admin -> Fragment -> \"Сессия входа (cookie)\""
-            )}
+            return error_result(FragmentAuthError("Fragment requires an authorized Telegram session cookie on fragment.com."))
         if link_result.get("error"):
-            return {"success": False, "error": link_result["error"]}
+            return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
         if self.wallet_version == WALLET_V5R1:
@@ -519,7 +523,7 @@ class FragmentClient:
                 **confirm_params,
             })
 
-        return {"success": True, "error": None}
+        return success_result()
 
     async def buy_premium_gift(self, username: str, months: int, anonymous: bool = True) -> dict:
         """
@@ -541,7 +545,7 @@ class FragmentClient:
         if init_result.get("need_ton"):
             raise FragmentError("Fragment не подтвердил кошелёк (need_ton) — проверьте connect_wallet()")
         if init_result.get("error"):
-            return {"success": False, "error": init_result["error"]}
+            return error_result(init_result["error"], default_code=FragmentPaymentError)
 
         req_id = init_result["req_id"]
 
@@ -553,12 +557,9 @@ class FragmentClient:
             "device": json.dumps(self._device),
         })
         if link_result.get("need_verify"):
-            return {"success": False, "error": (
-                "Fragment требует вход через Telegram-аккаунт на сайте — "
-                "настройте сессию входа в /admin -> Fragment -> \"Сессия входа (cookie)\""
-            )}
+            return error_result(FragmentAuthError("Fragment requires an authorized Telegram session cookie on fragment.com."))
         if link_result.get("error"):
-            return {"success": False, "error": link_result["error"]}
+            return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
         boc = await (self._sign_and_broadcast_v5(transaction) if self.wallet_version == WALLET_V5R1
@@ -574,7 +575,7 @@ class FragmentClient:
                 **confirm_params,
             })
 
-        return {"success": True, "error": None}
+        return success_result()
 
     # ---------- Покупка + передача уникальных (коллекционных) подарков ----------
     # Найдено вживую в js/auction.js на fragment.com — те же принципы, что buy_stars:
@@ -623,12 +624,9 @@ class FragmentClient:
             "bid": str(bid_amount),
         })
         if link_result.get("need_verify"):
-            return {"success": False, "error": (
-                "Fragment требует вход через Telegram-аккаунт на сайте — "
-                "настройте сессию входа в /admin -> Fragment -> \"Сессия входа (cookie)\""
-            )}
+            return error_result(FragmentAuthError("Fragment requires an authorized Telegram session cookie on fragment.com."))
         if link_result.get("error"):
-            return {"success": False, "error": link_result["error"]}
+            return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
         boc = await (self._sign_and_broadcast_v5(transaction) if self.wallet_version == WALLET_V5R1
@@ -643,7 +641,7 @@ class FragmentClient:
                 "boc": boc,
                 **confirm_params,
             })
-        return {"success": True, "error": None}
+        return success_result()
 
     async def transfer_gift(self, owned_item_slug: str, recipient_username: str, anonymous: bool = True) -> dict:
         """Передаёт УЖЕ купленный (лежащий на этом аккаунте) подарок другому @username.
@@ -660,18 +658,18 @@ class FragmentClient:
             "query": recipient_username.lstrip("@"),
         })
         if search_result.get("error"):
-            return {"success": False, "error": f"поиск получателя: {search_result['error']}"}
+            return error_result(f"recipient search: {search_result['error']}", default_code=FragmentRecipientError)
         found = search_result.get("found") or {}
         recipient_token = found.get("recipient")
         if not recipient_token:
-            return {"success": False, "error": f"получатель @{recipient_username.lstrip('@')} не найден на Fragment"}
+            return error_result(f"recipient @{recipient_username.lstrip('@')} was not found on Fragment", default_code=FragmentRecipientError)
 
         init_result = await self._api_request("initNftTransferRequest", {
             "recipient": recipient_token,
             "slug": owned_item_slug,
         })
         if init_result.get("error"):
-            return {"success": False, "error": init_result["error"]}
+            return error_result(init_result["error"], default_code=FragmentTransferError)
 
         req_id = init_result["req_id"]
 
@@ -680,12 +678,9 @@ class FragmentClient:
             "show_sender": 0 if anonymous else 1,
         })
         if link_result.get("need_verify"):
-            return {"success": False, "error": (
-                "Fragment требует вход через Telegram-аккаунт на сайте — "
-                "настройте сессию входа в /admin -> Fragment -> \"Сессия входа (cookie)\""
-            )}
+            return error_result(FragmentAuthError("Fragment requires an authorized Telegram session cookie on fragment.com."))
         if link_result.get("error"):
-            return {"success": False, "error": link_result["error"]}
+            return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
         boc = await (self._sign_and_broadcast_v5(transaction) if self.wallet_version == WALLET_V5R1
@@ -700,7 +695,7 @@ class FragmentClient:
                 "boc": boc,
                 **confirm_params,
             })
-        return {"success": True, "error": None}
+        return success_result()
 
     async def buy_and_deliver_gift(self, item_slug: str, bid_amount, recipient_username: str, anonymous: bool = True) -> dict:
         """Покупает лот и сразу передаёт указанному @username — оба шага через Fragment/TON."""
@@ -713,8 +708,12 @@ class FragmentClient:
             transfer_result = await self.transfer_gift(item_slug, recipient_username, anonymous=anonymous)
             if transfer_result["success"]:
                 return transfer_result
-            return {"success": False,
-                    "error": f"покупка: {buy_result.get('error')}; передача: {transfer_result.get('error')}"}
+            return error_result(
+                FragmentTransferError(
+                    "gift purchase and delivery failed",
+                    details={"purchase": buy_result.get("error"), "transfer": transfer_result.get("error")},
+                )
+            )
         return await self.transfer_gift(item_slug, recipient_username, anonymous=anonymous)
 
     async def get_balance_ton(self) -> Tuple[Optional[float], Optional[str]]:
