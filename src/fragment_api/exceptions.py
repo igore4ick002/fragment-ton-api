@@ -9,6 +9,7 @@ class FragmentError(Exception):
     """Base exception for all fragment_api errors."""
 
     code = "fragment_error"
+    is_html: bool = False  # True → message contains safe HTML (e.g. <a href>)
 
     def __init__(self, message: str, *, details: Any = None):
         super().__init__(message)

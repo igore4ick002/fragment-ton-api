@@ -824,11 +824,14 @@ class FragmentClient:
             raise FragmentWalletError(f"Не удалось проверить баланс кошелька: {ex}") from ex
         required_ton = required_nanotons / 1_000_000_000 + gas_buffer_ton
         if balance_ton < required_ton:
-            raise FragmentWalletError(
+            addr = self.wallet_address
+            exc = FragmentWalletError(
                 f"Недостаточно средств: на кошельке {balance_ton:.4f} TON, "
                 f"нужно ≈{required_ton:.4f} TON (включая ~{gas_buffer_ton} TON на газ). "
-                f"Пополните адрес {self.wallet_address}."
+                f'Пополните адрес <a href="https://tonviewer.com/{addr}">{addr}</a>.'
             )
+            exc.is_html = True
+            raise exc
 
     async def get_balance_ton(self) -> float:
         """Баланс кошелька в TON. Возвращает float, бросает исключение при ошибке."""
