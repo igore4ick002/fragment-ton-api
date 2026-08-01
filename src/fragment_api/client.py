@@ -54,6 +54,7 @@ from .exceptions import (
     FragmentPaymentError,
     FragmentRecipientError,
     FragmentTransferError,
+    FragmentWalletError,
     error_result,
     success_result,
 )
@@ -402,6 +403,18 @@ class FragmentClient:
             await self._lite_balancer.start_up()
         return self._lite_balancer
 
+    async def _discard_lite_balancer(self):
+        """Drops the cached LiteBalancer so the next call picks a fresh liteserver.
+        Without this, a single flaky/misconfigured node in the trust_level=2 pool
+        (e.g. one returning corrupt gas price config) stays cached forever and every
+        subsequent call keeps failing against the same broken node."""
+        if self._lite_balancer is not None:
+            try:
+                await self._lite_balancer.close_all()
+            except Exception:
+                pass
+            self._lite_balancer = None
+
     async def _sign_and_broadcast_v5(self, transaction: dict) -> str:
         from pytoniq.contract.wallets.wallet_v5 import WalletV5R1
         from pytoniq_core import Address, Cell as CoreCell
@@ -412,17 +425,25 @@ class FragmentClient:
             raise FragmentError("Ожидалось одно сообщение в транзакции — формат Fragment мог измениться")
         msg = messages[0]
 
-        balancer = await self._get_lite_balancer()
-        _pub, priv = mnemonic_to_private_key(self.mnemonic_words)
-        wallet = await WalletV5R1.from_private_key(balancer, priv, wc=0, network_global_id=-239)
-
         body = CoreCell.empty() if not msg.get("payload") else CoreCell.one_from_boc(_lenient_b64decode(msg["payload"]))
-        await wallet.transfer(
-            destination=Address(msg["address"]),
-            amount=int(msg["amount"]),
-            body=body,
-        )
-        return "sent-via-liteserver"
+
+        last_error = None
+        for attempt in (1, 2):
+            try:
+                balancer = await self._get_lite_balancer()
+                _pub, priv = mnemonic_to_private_key(self.mnemonic_words)
+                wallet = await WalletV5R1.from_private_key(balancer, priv, wc=0, network_global_id=-239)
+                await wallet.transfer(
+                    destination=Address(msg["address"]),
+                    amount=int(msg["amount"]),
+                    body=body,
+                )
+                return "sent-via-liteserver"
+            except Exception as ex:
+                last_error = ex
+                await self._discard_lite_balancer()
+
+        raise FragmentWalletError(f"Не удалось отправить транзакцию через TON liteserver после повторной попытки: {last_error}")
 
     async def _sign_and_broadcast_v4(self, transaction: dict) -> str:
         from tonsdk.boc import Cell
@@ -734,6 +755,7 @@ class FragmentClient:
                     return 0.0, None  # кошелёк ещё не активирован в сети — баланс 0
                 return account.storage.balance.grams / 1_000_000_000, None
             except Exception as ex:
+                await self._discard_lite_balancer()
                 return None, str(ex)
 
         session = await self._get_session()

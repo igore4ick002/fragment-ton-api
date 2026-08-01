@@ -14,7 +14,7 @@ from fragment_api.client import (
     WALLET_V5R1,
     _lenient_b64decode,
 )
-from fragment_api.exceptions import FragmentError
+from fragment_api.exceptions import FragmentError, FragmentWalletError
 
 MNEMONIC_V5 = " ".join(["word"] * 24)
 MNEMONIC_V4 = (
@@ -333,6 +333,110 @@ async def test_sign_and_broadcast_v5_happy_path(monkeypatch):
 
     assert result == "sent-via-liteserver"
     assert len(fake_wallet.transfer_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_sign_and_broadcast_v5_retries_once_then_succeeds_on_fresh_balancer(monkeypatch):
+    """Simulates a flaky first liteserver (e.g. corrupt gas-price config) followed
+    by a healthy one on retry — the client must discard the bad balancer and
+    reconnect rather than reusing it forever."""
+    client = make_client(WALLET_V5R1)
+
+    class FakeWallet:
+        async def transfer(self, destination, amount, body):
+            return None
+
+    attempts = {"n": 0}
+
+    async def fake_from_private_key(provider, private_key, wc=0, network_global_id=None, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("gas prices config param 21 has unparsed data")
+        return FakeWallet()
+
+    from pytoniq.contract.wallets.wallet_v5 import WalletV5R1
+    monkeypatch.setattr(WalletV5R1, "from_private_key", fake_from_private_key)
+
+    balancer_calls = []
+
+    async def fake_get_lite_balancer():
+        balancer_calls.append(True)
+        return object()
+
+    client._get_lite_balancer = fake_get_lite_balancer
+    discarded = []
+
+    async def fake_discard():
+        discarded.append(True)
+
+    client._discard_lite_balancer = fake_discard
+
+    transaction = {"messages": [{"address": client.wallet_address, "amount": "1000000"}]}
+    result = await client._sign_and_broadcast_v5(transaction)
+
+    assert result == "sent-via-liteserver"
+    assert attempts["n"] == 2
+    assert len(discarded) == 1
+
+
+@pytest.mark.asyncio
+async def test_sign_and_broadcast_v5_raises_wallet_error_after_two_failed_attempts(monkeypatch):
+    client = make_client(WALLET_V5R1)
+
+    async def fake_from_private_key(provider, private_key, wc=0, network_global_id=None, **kwargs):
+        raise RuntimeError("liteserver keeps crashing")
+
+    from pytoniq.contract.wallets.wallet_v5 import WalletV5R1
+    monkeypatch.setattr(WalletV5R1, "from_private_key", fake_from_private_key)
+
+    async def fake_get_lite_balancer():
+        return object()
+
+    client._get_lite_balancer = fake_get_lite_balancer
+    client._discard_lite_balancer = _noop_async()
+
+    transaction = {"messages": [{"address": client.wallet_address, "amount": "1000000"}]}
+    with pytest.raises(FragmentWalletError, match="liteserver keeps crashing"):
+        await client._sign_and_broadcast_v5(transaction)
+
+
+@pytest.mark.asyncio
+async def test_discard_lite_balancer_closes_and_clears():
+    client = make_client()
+    closed = []
+
+    class FakeBalancer:
+        async def close_all(self):
+            closed.append(True)
+
+    client._lite_balancer = FakeBalancer()
+
+    await client._discard_lite_balancer()
+
+    assert closed == [True]
+    assert client._lite_balancer is None
+
+
+@pytest.mark.asyncio
+async def test_discard_lite_balancer_swallows_close_error():
+    client = make_client()
+
+    class FakeBalancer:
+        async def close_all(self):
+            raise RuntimeError("already down")
+
+    client._lite_balancer = FakeBalancer()
+
+    await client._discard_lite_balancer()  # must not raise
+
+    assert client._lite_balancer is None
+
+
+@pytest.mark.asyncio
+async def test_discard_lite_balancer_noop_when_none():
+    client = make_client()
+    await client._discard_lite_balancer()
+    assert client._lite_balancer is None
 
 
 # ---------- _sign_and_broadcast_v4 payload branch + success ----------
@@ -836,6 +940,32 @@ async def test_buy_and_deliver_gift_returns_transfer_result_when_buy_failed_but_
 
 
 # ---------- get_balance_ton: toncenter api key header + exception branch ----------
+
+@pytest.mark.asyncio
+async def test_get_balance_ton_v5_discards_balancer_on_failure():
+    client = make_client(WALLET_V5R1)
+
+    class ExplodingBalancer:
+        async def raw_get_account_state(self, address):
+            raise RuntimeError("gas prices config param 21 has unparsed data")
+
+    async def fake_get_lite_balancer():
+        return ExplodingBalancer()
+
+    client._get_lite_balancer = fake_get_lite_balancer
+    discarded = []
+
+    async def fake_discard():
+        discarded.append(True)
+
+    client._discard_lite_balancer = fake_discard
+
+    balance, error = await client.get_balance_ton()
+
+    assert balance is None
+    assert "gas prices config" in error
+    assert discarded == [True]
+
 
 @pytest.mark.asyncio
 async def test_get_balance_ton_v4_sends_api_key_header():
