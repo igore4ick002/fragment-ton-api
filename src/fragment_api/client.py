@@ -410,53 +410,104 @@ class FragmentClient:
             self._lite_balancer = None
 
     async def _get_lite_balancer(self, trust_level: int = 2):
-        # Если передан trust_level отличный от кэшированного — сбросить и создать заново
         if self._lite_balancer is not None:
-            cached_trust = getattr(self._lite_balancer, "_frag_trust_level", 2)
-            if cached_trust != trust_level:
+            if getattr(self._lite_balancer, "_frag_trust_level", 2) != trust_level:
                 await self._discard_lite_balancer()
         if self._lite_balancer is None:
             from pytoniq import LiteBalancer
-            self._lite_balancer = LiteBalancer.from_mainnet_config(trust_level=trust_level)
-            self._lite_balancer._frag_trust_level = trust_level
-            await self._lite_balancer.start_up()
+            # start_up() может упасть с "no alive peers" при плохой сети —
+            # повторяем до 3 раз с экспоненциальной задержкой
+            last_err = None
+            for attempt in range(3):
+                if attempt:
+                    await asyncio.sleep(2 ** attempt)
+                try:
+                    lb = LiteBalancer.from_mainnet_config(trust_level=trust_level)
+                    await lb.start_up()
+                    lb._frag_trust_level = trust_level
+                    self._lite_balancer = lb
+                    return self._lite_balancer
+                except Exception as e:
+                    last_err = e
+                    logger.warning("LiteBalancer start_up attempt %d failed: %s", attempt + 1, e)
+            raise FragmentWalletError(f"Не удалось подключиться ни к одному TON liteserver: {last_err}")
         return self._lite_balancer
 
+    async def _get_wallet_state_toncenter(self) -> dict:
+        """Диагностика кошелька через TonCenter: баланс и статус (active/uninitialized)."""
+        session = await self._get_session()
+        headers = {"X-API-Key": self.toncenter_api_key} if self.toncenter_api_key else {}
+        try:
+            async with session.get(
+                f"{TONCENTER_API}/getAddressInformation",
+                params={"address": self.wallet_address},
+                headers=headers,
+            ) as resp:
+                data = await resp.json()
+                result = data.get("result", {})
+                return {
+                    "balance": int(result.get("balance", 0)),
+                    "state": result.get("state", "unknown"),
+                }
+        except Exception as ex:
+            return {"balance": -1, "state": "unknown", "error": str(ex)}
+
     async def _sign_and_broadcast_v5(self, transaction: dict) -> str:
-        from pytoniq.contract.wallets.wallet_v5 import WalletV5R1
-        from pytoniq_core import Address, Cell as CoreCell
+        from pytoniq.contract.wallets.wallet_v5 import WALLET_V5_R1_CODE, WalletV5R1
+        from pytoniq_core import Address, Cell as CoreCell, StateInit
         from pytoniq_core.crypto.keys import mnemonic_to_private_key
 
         messages = transaction["messages"]
         if len(messages) != 1:
             raise FragmentError("Ожидалось одно сообщение в транзакции — формат Fragment мог измениться")
         msg = messages[0]
-
         body = CoreCell.empty() if not msg.get("payload") else CoreCell.one_from_boc(_lenient_b64decode(msg["payload"]))
+        _pub, priv = mnemonic_to_private_key(self.mnemonic_words)
 
-        # Попытки: 1-2 с trust_level=2 (быстро), 3-4 с trust_level=1 (надёжнее, медленнее).
-        # Между попытками — пауза, чтобы дать liteserver время синхронизироваться.
-        RETRY_PLAN = [(2, 0), (2, 1.5), (1, 3.0), (1, 3.0)]
+        # Всегда передаём stateInit — это безопасно для уже развёрнутых кошельков
+        # и критически важно для первой транзакции с нового (ещё не активированного) адреса.
+        # "rejected before smart-contract execution" = кошелёк не задеплоен → без stateInit
+        # транзакция будет отклонена каждый раз.
+        state_init = StateInit(
+            code=WALLET_V5_R1_CODE,
+            data=WalletV5R1.create_data_cell(self.public_key, wc=0, network_global_id=-239),
+        )
+
+        RETRY_PLAN = [(2, 0), (2, 2.0), (1, 4.0), (1, 6.0)]
         last_error = None
-        for trust_level, sleep_before in RETRY_PLAN:
-            if sleep_before > 0:
-                await asyncio.sleep(sleep_before)
+        for trust_level, sleep_sec in RETRY_PLAN:
+            if sleep_sec:
+                await asyncio.sleep(sleep_sec)
             try:
                 balancer = await self._get_lite_balancer(trust_level=trust_level)
-                _pub, priv = mnemonic_to_private_key(self.mnemonic_words)
                 wallet = await WalletV5R1.from_private_key(balancer, priv, wc=0, network_global_id=-239)
                 await wallet.transfer(
                     destination=Address(msg["address"]),
                     amount=int(msg["amount"]),
                     body=body,
+                    state_init=state_init,
                 )
                 return "sent-via-liteserver"
             except Exception as ex:
                 last_error = ex
-                logger.warning("_sign_and_broadcast_v5 attempt failed (trust=%d): %s", trust_level, ex)
+                logger.warning("v5 broadcast attempt failed (trust=%d): %s", trust_level, ex)
                 await self._discard_lite_balancer()
 
-        raise FragmentWalletError(f"Не удалось отправить транзакцию через TON liteserver после повторной попытки: {last_error}")
+        # Все попытки провалились — диагностируем и даём понятную ошибку
+        ws = await self._get_wallet_state_toncenter()
+        if ws.get("balance", -1) == 0:
+            raise FragmentWalletError(
+                f"TON-кошелёк пуст. Пополните адрес {self.wallet_address} "
+                "и повторите попытку."
+            )
+        if ws.get("state") == "uninitialized":
+            raise FragmentWalletError(
+                f"Кошелёк не активирован ({self.wallet_address}). "
+                "Отправьте хотя бы 0.05 TON на этот адрес для активации."
+            )
+        raise FragmentWalletError(
+            f"Не удалось отправить транзакцию через TON liteserver: {last_error}"
+        )
 
     async def _sign_and_broadcast_v4(self, transaction: dict) -> str:
         from tonsdk.boc import Cell
