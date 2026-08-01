@@ -41,6 +41,7 @@
 import base64
 import hashlib
 import json
+import logging
 import re
 import time
 from typing import Optional, Tuple
@@ -58,8 +59,11 @@ from .exceptions import (
 )
 from .types import BalanceResult, PaymentResult
 
+logger = logging.getLogger(__name__)
+
 FRAGMENT_BASE = "https://fragment.com"
 TONCENTER_API = "https://toncenter.com/api/v2"
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 WALLET_V4R2 = "v4r2"
 WALLET_V5R1 = "v5r1"
@@ -181,7 +185,7 @@ class FragmentClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None:
             jar = aiohttp.CookieJar()
-            self._session = aiohttp.ClientSession(cookie_jar=jar)
+            self._session = aiohttp.ClientSession(cookie_jar=jar, timeout=REQUEST_TIMEOUT)
 
             raw_cookies = self.fragment_cookies
             if raw_cookies:
@@ -208,6 +212,8 @@ class FragmentClient:
 
         self._api_hash = hash_match.group(1)
         self._ton_proof_payload = proof_match.group(1) if proof_match else None
+        if proof_match is None:
+            logger.warning("_load_page: got api hash but no ton_proof payload — connect_wallet() will fail later")
         self._referer = f"{FRAGMENT_BASE}/stars/buy"
         self._connected = False
 

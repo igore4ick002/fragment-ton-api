@@ -1,5 +1,6 @@
 """Read-only live catalog helpers for Fragment gifts."""
 
+import logging
 import re
 from typing import Optional
 
@@ -8,7 +9,10 @@ import aiohttp
 from .exceptions import FragmentCatalogError
 from .types import CollectionItem, GiftItem
 
+logger = logging.getLogger(__name__)
+
 FRAGMENT_BASE = "https://fragment.com"
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 _COLLECTION_BLOCK_RE = re.compile(
     r'js-choose-collection-item" data-keywords="[^"]*" data-value="([a-z0-9]+)">(.*?)</a>', re.DOTALL
@@ -68,7 +72,7 @@ class FragmentCatalog:
         return headers
 
     async def list_collections(self) -> list[CollectionItem]:
-        async with aiohttp.ClientSession(headers=self._headers()) as session:
+        async with aiohttp.ClientSession(headers=self._headers(), timeout=REQUEST_TIMEOUT) as session:
             async with session.get(f"{FRAGMENT_BASE}/gifts") as response:
                 response.raise_for_status()
                 html = await response.text()
@@ -87,6 +91,12 @@ class FragmentCatalog:
                     "name": name.group(1).strip(),
                     "url": f"{FRAGMENT_BASE}/gifts/{slug}",
                 })
+        if not result:
+            logger.warning(
+                "list_collections: parsed 0 collections from %d bytes of HTML — "
+                "fragment.com markup may have changed (js-choose-collection-item / tm-main-filters-name)",
+                len(html),
+            )
         return result
 
     async def list_gifts(self, collection_slug: str, limit: int = 60, sort: str = "price") -> list[GiftItem]:
@@ -96,8 +106,15 @@ class FragmentCatalog:
         if sort not in {"price", "recent"}:
             raise FragmentCatalogError("sort must be 'price' or 'recent'")
         url = f"{FRAGMENT_BASE}/gifts/{collection_slug}?sort={sort}&filter=sale"
-        async with aiohttp.ClientSession(headers=self._headers()) as session:
+        async with aiohttp.ClientSession(headers=self._headers(), timeout=REQUEST_TIMEOUT) as session:
             async with session.get(url) as response:
                 response.raise_for_status()
                 html = await response.text()
-        return _parse_items(html, collection_slug, limit)
+        items = _parse_items(html, collection_slug, limit)
+        if not items:
+            logger.warning(
+                "list_gifts(%r): parsed 0 items from %d bytes of HTML — "
+                "fragment.com markup may have changed (tm-grid-item / tm-grid-item-status)",
+                collection_slug, len(html),
+            )
+        return items
