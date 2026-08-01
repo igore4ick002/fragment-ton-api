@@ -39,3 +39,7 @@ class GiftItem(TypedDict):
 class BalanceResult:
     balance: Optional[float]
     error: Optional[str] = None
+    usd: Optional[float] = None
+    rub: Optional[float] = None
+    ton_price_usd: Optional[float] = None
+    ton_price_rub: Optional[float] = None

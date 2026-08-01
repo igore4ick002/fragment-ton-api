@@ -600,6 +600,8 @@ class FragmentClient:
             return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
+        amount = int(transaction["messages"][0]["amount"])
+        await self._check_balance(amount)
         if self.wallet_version == WALLET_V5R1:
             boc = await self._sign_and_broadcast_v5(transaction)
         else:
@@ -654,6 +656,8 @@ class FragmentClient:
             return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
+        amount = int(transaction["messages"][0]["amount"])
+        await self._check_balance(amount)
         boc = await (self._sign_and_broadcast_v5(transaction) if self.wallet_version == WALLET_V5R1
                      else self._sign_and_broadcast_v4(transaction))
 
@@ -721,6 +725,8 @@ class FragmentClient:
             return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
+        amount = int(transaction["messages"][0]["amount"])
+        await self._check_balance(amount)
         boc = await (self._sign_and_broadcast_v5(transaction) if self.wallet_version == WALLET_V5R1
                      else self._sign_and_broadcast_v4(transaction))
 
@@ -775,6 +781,8 @@ class FragmentClient:
             return error_result(link_result["error"], default_code=FragmentPaymentError)
 
         transaction = link_result["transaction"]
+        amount = int(transaction["messages"][0]["amount"])
+        await self._check_balance(amount, gas_buffer_ton=0.02)  # transfer дешевле — меньший буфер
         boc = await (self._sign_and_broadcast_v5(transaction) if self.wallet_version == WALLET_V5R1
                      else self._sign_and_broadcast_v4(transaction))
 
@@ -808,6 +816,20 @@ class FragmentClient:
             )
         return await self.transfer_gift(item_slug, recipient_username, anonymous=anonymous)
 
+    async def _check_balance(self, required_nanotons: int, gas_buffer_ton: float = 0.05) -> None:
+        """Проверяет, хватает ли баланса для транзакции. Бросает FragmentWalletError если нет."""
+        try:
+            balance_ton = await self.get_balance_ton()
+        except Exception as ex:
+            raise FragmentWalletError(f"Не удалось проверить баланс кошелька: {ex}") from ex
+        required_ton = required_nanotons / 1_000_000_000 + gas_buffer_ton
+        if balance_ton < required_ton:
+            raise FragmentWalletError(
+                f"Недостаточно средств: на кошельке {balance_ton:.4f} TON, "
+                f"нужно ≈{required_ton:.4f} TON (включая ~{gas_buffer_ton} TON на газ). "
+                f"Пополните адрес {self.wallet_address}."
+            )
+
     async def get_balance_ton(self) -> float:
         """Баланс кошелька в TON. Возвращает float, бросает исключение при ошибке."""
         if self.wallet_version == WALLET_V5R1:
@@ -836,13 +858,37 @@ class FragmentClient:
                 raise FragmentWalletError(data.get("error", f"HTTP {resp.status}"))
             return int(data["result"]) / 1_000_000_000
 
+    async def get_ton_price(self) -> dict:
+        """Текущий курс TON в USD и RUB через CoinGecko (бесплатный API, без ключа).
+        Возвращает {"usd": float, "rub": float} или бросает исключение при ошибке."""
+        session = await self._get_session()
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {"ids": "the-open-network", "vs_currencies": "usd,rub"}
+        async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            data = await resp.json()
+            prices = data.get("the-open-network", {})
+            if not prices:
+                raise FragmentError("CoinGecko не вернул курс TON")
+            return {"usd": float(prices["usd"]), "rub": float(prices["rub"])}
+
     async def get_balance(self) -> BalanceResult:
-        """Return wallet balance as a typed dataclass (never raises)."""
+        """Баланс кошелька в TON + конвертация в USD и RUB. Никогда не бросает исключение."""
         try:
             balance = await self.get_balance_ton()
-            return BalanceResult(balance=balance, error=None)
         except Exception as ex:
             return BalanceResult(balance=None, error=str(ex))
+        try:
+            prices = await self.get_ton_price()
+            return BalanceResult(
+                balance=balance,
+                usd=round(balance * prices["usd"], 2),
+                rub=round(balance * prices["rub"], 2),
+                ton_price_usd=prices["usd"],
+                ton_price_rub=prices["rub"],
+            )
+        except Exception:
+            # Курс недоступен — возвращаем хотя бы TON-баланс без конвертации
+            return BalanceResult(balance=balance)
 
     async def close(self):
         if self._session:
