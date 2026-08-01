@@ -38,6 +38,7 @@
 #     переменную окружения FRAGMENT_TON_MNEMONIC как запасной вариант.
 #   - pip install tonsdk pytoniq aiohttp
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -396,13 +397,6 @@ class FragmentClient:
             raise FragmentError(f"Получатель @{username} не найден на Fragment")
         return found
 
-    async def _get_lite_balancer(self):
-        if self._lite_balancer is None:
-            from pytoniq import LiteBalancer
-            self._lite_balancer = LiteBalancer.from_mainnet_config(trust_level=2)
-            await self._lite_balancer.start_up()
-        return self._lite_balancer
-
     async def _discard_lite_balancer(self):
         """Drops the cached LiteBalancer so the next call picks a fresh liteserver.
         Without this, a single flaky/misconfigured node in the trust_level=2 pool
@@ -414,6 +408,19 @@ class FragmentClient:
             except Exception:
                 pass
             self._lite_balancer = None
+
+    async def _get_lite_balancer(self, trust_level: int = 2):
+        # Если передан trust_level отличный от кэшированного — сбросить и создать заново
+        if self._lite_balancer is not None:
+            cached_trust = getattr(self._lite_balancer, "_frag_trust_level", 2)
+            if cached_trust != trust_level:
+                await self._discard_lite_balancer()
+        if self._lite_balancer is None:
+            from pytoniq import LiteBalancer
+            self._lite_balancer = LiteBalancer.from_mainnet_config(trust_level=trust_level)
+            self._lite_balancer._frag_trust_level = trust_level
+            await self._lite_balancer.start_up()
+        return self._lite_balancer
 
     async def _sign_and_broadcast_v5(self, transaction: dict) -> str:
         from pytoniq.contract.wallets.wallet_v5 import WalletV5R1
@@ -427,10 +434,15 @@ class FragmentClient:
 
         body = CoreCell.empty() if not msg.get("payload") else CoreCell.one_from_boc(_lenient_b64decode(msg["payload"]))
 
+        # Попытки: 1-2 с trust_level=2 (быстро), 3-4 с trust_level=1 (надёжнее, медленнее).
+        # Между попытками — пауза, чтобы дать liteserver время синхронизироваться.
+        RETRY_PLAN = [(2, 0), (2, 1.5), (1, 3.0), (1, 3.0)]
         last_error = None
-        for attempt in (1, 2):
+        for trust_level, sleep_before in RETRY_PLAN:
+            if sleep_before > 0:
+                await asyncio.sleep(sleep_before)
             try:
-                balancer = await self._get_lite_balancer()
+                balancer = await self._get_lite_balancer(trust_level=trust_level)
                 _pub, priv = mnemonic_to_private_key(self.mnemonic_words)
                 wallet = await WalletV5R1.from_private_key(balancer, priv, wc=0, network_global_id=-239)
                 await wallet.transfer(
@@ -441,6 +453,7 @@ class FragmentClient:
                 return "sent-via-liteserver"
             except Exception as ex:
                 last_error = ex
+                logger.warning("_sign_and_broadcast_v5 attempt failed (trust=%d): %s", trust_level, ex)
                 await self._discard_lite_balancer()
 
         raise FragmentWalletError(f"Не удалось отправить транзакцию через TON liteserver после повторной попытки: {last_error}")
@@ -744,41 +757,41 @@ class FragmentClient:
             )
         return await self.transfer_gift(item_slug, recipient_username, anonymous=anonymous)
 
-    async def get_balance_ton(self) -> Tuple[Optional[float], Optional[str]]:
-        """Баланс кошелька в TON. Возвращает (баланс, ошибка)."""
+    async def get_balance_ton(self) -> float:
+        """Баланс кошелька в TON. Возвращает float, бросает исключение при ошибке."""
         if self.wallet_version == WALLET_V5R1:
             from pytoniq_core import Address
             try:
                 balancer = await self._get_lite_balancer()
                 account, _shard_account = await balancer.raw_get_account_state(Address(self.wallet_address))
                 if account is None:
-                    return 0.0, None  # кошелёк ещё не активирован в сети — баланс 0
-                return account.storage.balance.grams / 1_000_000_000, None
+                    return 0.0  # кошелёк ещё не активирован в сети — баланс 0
+                return account.storage.balance.grams / 1_000_000_000
             except Exception as ex:
                 await self._discard_lite_balancer()
-                return None, str(ex)
+                raise FragmentWalletError(f"Не удалось получить баланс: {ex}") from ex
 
         session = await self._get_session()
         headers = {}
         if self.toncenter_api_key:
             headers["X-API-Key"] = self.toncenter_api_key
-        try:
-            async with session.get(
-                f"{TONCENTER_API}/getAddressBalance",
-                params={"address": self.wallet_address},
-                headers=headers,
-            ) as resp:
-                data = await resp.json()
-                if not data.get("ok"):
-                    return None, data.get("error", f"HTTP {resp.status}")
-                return int(data["result"]) / 1_000_000_000, None
-        except Exception as ex:
-            return None, str(ex)
+        async with session.get(
+            f"{TONCENTER_API}/getAddressBalance",
+            params={"address": self.wallet_address},
+            headers=headers,
+        ) as resp:
+            data = await resp.json()
+            if not data.get("ok"):
+                raise FragmentWalletError(data.get("error", f"HTTP {resp.status}"))
+            return int(data["result"]) / 1_000_000_000
 
     async def get_balance(self) -> BalanceResult:
-        """Return wallet balance as a typed dataclass."""
-        balance, error = await self.get_balance_ton()
-        return BalanceResult(balance=balance, error=error)
+        """Return wallet balance as a typed dataclass (never raises)."""
+        try:
+            balance = await self.get_balance_ton()
+            return BalanceResult(balance=balance, error=None)
+        except Exception as ex:
+            return BalanceResult(balance=None, error=str(ex))
 
     async def close(self):
         if self._session:

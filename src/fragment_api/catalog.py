@@ -100,12 +100,17 @@ class FragmentCatalog:
         return result
 
     async def list_gifts(self, collection_slug: str, limit: int = 60, sort: str = "price") -> list[GiftItem]:
-        """Return currently available fixed-price gifts from one collection."""
+        """Return currently available fixed-price gifts from one collection.
+
+        sort: "price" / "price_asc" → cheapest first; "recent" → newest first.
+        """
         if not 1 <= limit <= 200:
             raise FragmentCatalogError("limit must be between 1 and 200")
-        if sort not in {"price", "recent"}:
-            raise FragmentCatalogError("sort must be 'price' or 'recent'")
-        url = f"{FRAGMENT_BASE}/gifts/{collection_slug}?sort={sort}&filter=sale"
+        _SORT_ALIASES = {"price_asc": "price", "price_desc": "price"}
+        sort_param = _SORT_ALIASES.get(sort, sort)
+        if sort_param not in {"price", "recent"}:
+            raise FragmentCatalogError("sort must be 'price', 'price_asc', or 'recent'")
+        url = f"{FRAGMENT_BASE}/gifts/{collection_slug}?sort={sort_param}&filter=sale"
         async with aiohttp.ClientSession(headers=self._headers(), timeout=REQUEST_TIMEOUT) as session:
             async with session.get(url) as response:
                 response.raise_for_status()
