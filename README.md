@@ -1,19 +1,14 @@
 # fragment-ton-api
 
-Unofficial async Python client for Fragment.com, TON payments, Telegram Stars, Telegram Premium gifts, and collectible Telegram gifts.
+Unofficial async Python client for Fragment.com, TON payments, Telegram Stars, Telegram Premium gifts, collectible Telegram gifts, anonymous phone numbers, and Telegram usernames.
 
 The client signs TON transactions locally. Your wallet mnemonic is not sent to Fragment or to any third-party server.
 
 ## Links
 
 - GitHub: https://github.com/igore4ick002/fragment-ton-api
-- Documentation: https://github.com/igore4ick002/fragment-ton-api#readme
-- Issues: https://github.com/igore4ick002/fragment-ton-api/issues
 - PyPI: https://pypi.org/project/fragment-ton-api/
-- API reference: https://github.com/igore4ick002/fragment-ton-api/blob/main/docs/api.md
-- Examples: https://github.com/igore4ick002/fragment-ton-api/tree/main/examples
-- Authentication guide: https://github.com/igore4ick002/fragment-ton-api/blob/main/docs/auth.md
-- Error codes: https://github.com/igore4ick002/fragment-ton-api/blob/main/docs/errors.md
+- Issues: https://github.com/igore4ick002/fragment-ton-api/issues
 
 ## Installation
 
@@ -51,6 +46,8 @@ asyncio.run(main())
 - `wallet_version`: `"v5r1"` by default, or `"v4r2"`.
 - `fragment_cookies`: cookies from an authorized Telegram session on fragment.com. Without cookies, Fragment may return `need_verify`.
 
+---
+
 ## 1. Buy Telegram Stars
 
 ```python
@@ -67,7 +64,6 @@ Parameters:
 - `username`: recipient Telegram username, with or without `@`.
 - `quantity`: number of Telegram Stars to buy.
 - `anonymous=True`: the recipient will not see the sender.
-- `anonymous=False`: the sender will be visible.
 
 Successful response:
 
@@ -86,14 +82,13 @@ Error response:
   "error": {
     "code": "fragment_payment_error",
     "message": "Fragment error description"
-  },
-  "error_code": "fragment_payment_error"
+  }
 }
 ```
 
-The method finds the user, creates the payment, signs the TON transaction, sends it to the network, and confirms the payment in Fragment.
+---
 
-## 2. Buy Telegram Premium Gifts
+## 2. Buy Telegram Premium Gift
 
 ```python
 result = await client.buy_premium_gift(
@@ -101,104 +96,68 @@ result = await client.buy_premium_gift(
     months=3,
     anonymous=True,
 )
-print(result)
 ```
 
 Parameters:
 
 - `username`: Premium gift recipient.
-- `months`: usually `3`, `6`, or `12`.
+- `months`: `3`, `6`, or `12`.
 - `anonymous`: whether to hide the sender.
 
-Response format:
+---
 
-```json
-{
-  "success": true,
-  "error": null
-}
-```
+## 3. NFT Gift Catalog
 
-## 3. List Gift Collections and Gifts
-
-The catalog does not require a wallet:
+The catalog does not require a wallet or cookies:
 
 ```python
 from fragment_api import FragmentCatalog
 
 catalog = FragmentCatalog()
+```
+
+### List collections
+
+```python
 collections = await catalog.list_collections()
-print(collections)
+# [{"slug": "lol-pop", "name": "Lol Pop", "url": "...", "emoji": "🍭"}]
 ```
 
-Collection format:
-
-```json
-[
-  {
-    "slug": "lol-pop",
-    "name": "Lol Pop",
-    "url": "https://fragment.com/gifts/lol-pop"
-  }
-]
-```
-
-Get available fixed-price gifts:
+### List gifts in a collection
 
 ```python
 gifts = await catalog.list_gifts(
     collection_slug="lol-pop",
     limit=20,
-    sort="price",
+    sort="price",   # or "recent"
 )
 ```
 
-Gift item format:
+`GiftItem` fields: `slug`, `collection`, `number`, `name`, `price_ton`, `image_url`, `url`, `status`.
 
-```json
-{
-  "slug": "lol-pop-12345",
-  "collection": "lol-pop",
-  "number": 12345,
-  "name": "Gift name",
-  "price_ton": 1.5,
-  "image_url": "https://fragment.com/file/preview.png",
-  "url": "https://fragment.com/gift/lol-pop-12345",
-  "status": "for_sale"
-}
-```
-
-Use the `slug` value as `item_slug` or `owned_item_slug` in purchase and transfer methods.
-
-Current catalog support is focused on fixed-price listings, not auctions.
-
-## 4. Buy an NFT Gift by `item_slug`
+### Collection emoji
 
 ```python
-result = await client.buy_gift(
-    item_slug="lol-pop-12345",
-    bid_amount="1.5",
-)
-print(result)
+from fragment_api import get_gift_emoji, COLLECTION_EMOJI
+
+emoji = get_gift_emoji("lol-pop")   # "🍭"
+all_emojis = COLLECTION_EMOJI       # {"lol-pop": "🍭", ...}
 ```
 
-Parameters:
+---
 
-- `item_slug`: concrete listing slug from `list_gifts()`.
-- `bid_amount`: purchase amount in TON. Passing it as a string is recommended.
+## 4. Buy an NFT Gift
 
-Example response:
-
-```json
-{
-  "success": true,
-  "error": null
-}
+```python
+result = await client.buy_gift(item_slug="lol-pop-12345", bid_amount="1.5")
 ```
 
-After a successful purchase, the gift is assigned to the wallet connected to `FragmentClient`.
+- `item_slug`: slug from `list_gifts()`.
+- `bid_amount`: purchase amount in TON (string recommended).
 
-## 5. Transfer a Purchased Gift to a User
+---
+
+## 5. Transfer a Gift
 
 ```python
 result = await client.transfer_gift(
@@ -206,16 +165,9 @@ result = await client.transfer_gift(
     recipient_username="@username",
     anonymous=True,
 )
-print(result)
 ```
 
-Parameters:
-
-- `owned_item_slug`: slug of an already purchased gift.
-- `recipient_username`: Telegram username of the recipient.
-- `anonymous`: whether to hide the sender.
-
-The method finds the recipient in Fragment, creates the transfer transaction, signs it with the TON wallet, and confirms the transfer.
+---
 
 ## 6. Buy and Deliver a Gift in One Call
 
@@ -226,17 +178,137 @@ result = await client.buy_and_deliver_gift(
     recipient_username="@username",
     anonymous=True,
 )
-print(result)
 ```
 
-The method performs two steps:
+If purchase succeeds but transfer fails, retry with `transfer_gift()` — do not buy again.
 
-1. Buys the gift for the connected wallet.
-2. Transfers the gift to the selected Telegram user.
+---
 
-If purchase succeeds but transfer fails, the gift may already be on the sender wallet. Do not buy it again blindly; retry delivery with `transfer_gift()` first.
+## 7. Anonymous Phone Numbers
 
-## 7. Check TON Balance
+Browse and buy anonymous Telegram phone numbers available on Fragment.
+
+### List numbers
+
+```python
+from fragment_api import FragmentCatalog
+
+catalog = FragmentCatalog()
+numbers = await catalog.list_numbers(
+    limit=50,
+    sort="price",      # "price" (cheapest first) or "recent"
+    filter="all",      # "all" | "sale" | "auction"
+)
+```
+
+`filter` values:
+
+| Value | Description |
+|-------|-------------|
+| `"all"` | Fixed-price and auction items combined |
+| `"sale"` | Fixed-price only (buy now) |
+| `"auction"` | Currently on auction only |
+
+`NumberItem` fields:
+
+```python
+{
+    "slug": "88800000001",
+    "number": "+888 0000 0001",
+    "price_ton": 100.0,
+    "min_bid_ton": 105.0,    # minimum bid to outbid current leader
+    "auction_end": 1790000000,  # unix timestamp, None for fixed-price
+    "is_auction": False,
+    "status": "for_sale",    # "for_sale" | "on_auction"
+    "url": "https://fragment.com/number/88800000001",
+}
+```
+
+### Buy a number (fixed price or place bid)
+
+```python
+result = await client.buy_number(
+    number_slug="88800000001",
+    bid_amount=100.0,
+)
+```
+
+For fixed-price listings, `bid_amount` must equal the listed price. For auctions, it must be ≥ `min_bid_ton`.
+
+---
+
+## 8. Telegram Usernames
+
+Browse and bid on Telegram usernames listed on Fragment.
+
+### List usernames
+
+```python
+usernames = await catalog.list_usernames(
+    limit=50,
+    sort="price",
+    filter="all",   # "all" | "auction"
+)
+```
+
+`UsernameItem` fields:
+
+```python
+{
+    "slug": "coolname",
+    "username": "coolname",      # without @
+    "price_ton": 420.0,
+    "min_bid_ton": 441.0,
+    "auction_end": 1790000000,
+    "is_auction": True,
+    "status": "on_auction",
+    "url": "https://fragment.com/username/coolname",
+}
+```
+
+> **Note:** Fragment currently lists usernames only via auction. Fixed-price username listings (`filter="sale"`) may return an empty list without authentication.
+
+### Place a bid on a username
+
+```python
+result = await client.buy_username(
+    username_slug="coolname",
+    bid_amount=441.0,
+)
+```
+
+---
+
+## 9. Live Auction Info
+
+Get the current bid, minimum next bid, buy-now price, and time remaining for any item:
+
+```python
+info = await catalog.get_auction_info(
+    slug="lol-pop-12345",
+    item_type="gift",   # "gift" | "number" | "username"
+)
+```
+
+`AuctionInfo` fields:
+
+```python
+{
+    "slug": "lol-pop-12345",
+    "item_type": "gift",
+    "name": "Lol Pop #12345",
+    "current_bid": 10.0,
+    "min_next_bid": 10.5,
+    "buy_now_price": 15.0,   # None if not available
+    "auction_end": 1790000000,
+    "url": "https://fragment.com/gift/lol-pop-12345",
+    "image_url": "https://nft.fragment.com/gift/lol-pop-12345.webp",
+}
+```
+
+---
+
+## 10. Check TON Balance
 
 ```python
 balance, error = await client.get_balance_ton()
@@ -247,41 +319,19 @@ else:
     print("Balance:", balance, "TON")
 ```
 
-Successful result:
-
-```python
-(12.345, None)
-```
-
-Error result:
-
-```python
-(None, "error description")
-```
-
-Before buying anything, make sure the wallet has enough TON for the gift price and network fees.
+---
 
 ## Security
 
 Never publish these values in GitHub, README files, examples, logs, screenshots, or issue reports:
 
 - 24-word TON wallet mnemonic.
-- Fragment cookies.
+- Fragment cookies (`stel_ssid`, `stel_token`, `stel_ton_token`).
 - TonCenter API key.
-- PyPI tokens.
-- `.env` files and local databases.
+- PyPI tokens or `.env` files.
 
 This package uses Fragment web endpoints, not an official stable public Fragment API. Fragment may change HTML, endpoints, or authorization requirements at any time.
 
 ## Disclaimer
 
 This is an unofficial project. It is not affiliated with Telegram, Fragment, TON Foundation, or PyPI.
-
-## More
-
-- API reference: [docs/api.md](docs/api.md)
-- Authentication guide: [docs/auth.md](docs/auth.md)
-- Error codes: [docs/errors.md](docs/errors.md)
-- Example scenarios: [docs/examples.md](docs/examples.md)
-- Ready-to-run examples: [examples/](examples/)
-- Basic tests: [tests/](tests/)

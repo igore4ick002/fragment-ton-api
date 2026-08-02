@@ -241,6 +241,21 @@ class FragmentClient:
         self._referer = url
         self._connected = False
 
+    async def _load_item_context(self, slug: str, item_path: str):
+        """Generic page context loader for any Fragment item type (gift/number/username)."""
+        session = await self._get_session()
+        url = f"{FRAGMENT_BASE}/{item_path}/{slug}"
+        async with session.get(url) as resp:
+            html = await resp.text()
+        hash_match = re.search(r'"apiUrl":"\\?/api\?hash=([a-f0-9]+)"', html)
+        proof_match = re.search(r'"ton_proof":"([a-f0-9]+)"', html)
+        if not hash_match:
+            raise FragmentError(f"Не удалось получить api hash со страницы {url}")
+        self._api_hash = hash_match.group(1)
+        self._ton_proof_payload = proof_match.group(1) if proof_match else None
+        self._referer = url
+        self._connected = False
+
     async def _load_gift_context(self, item_slug: str):
         """Переключает клиента в контекст СТРАНИЦЫ ПОДАРКА (/gift/<slug>).
 
@@ -610,12 +625,17 @@ class FragmentClient:
         confirm_method = link_result.get("confirm_method")
         confirm_params = link_result.get("confirm_params", {})
         if confirm_method:
-            await self._api_request(confirm_method, {
+            confirm_result = await self._api_request(confirm_method, {
                 "account": json.dumps(self._account),
                 "device": json.dumps(self._device),
                 "boc": boc,
                 **confirm_params,
             })
+            if confirm_result.get("error"):
+                return error_result(
+                    f"Транзакция отправлена, но Fragment отклонил покупку: {confirm_result['error']}",
+                    default_code=FragmentPaymentError,
+                )
 
         return success_result()
 
@@ -664,12 +684,17 @@ class FragmentClient:
         confirm_method = link_result.get("confirm_method")
         confirm_params = link_result.get("confirm_params", {})
         if confirm_method:
-            await self._api_request(confirm_method, {
+            confirm_result = await self._api_request(confirm_method, {
                 "account": json.dumps(self._account),
                 "device": json.dumps(self._device),
                 "boc": boc,
                 **confirm_params,
             })
+            if confirm_result.get("error"):
+                return error_result(
+                    f"Транзакция отправлена, но Fragment отклонил покупку: {confirm_result['error']}",
+                    default_code=FragmentPaymentError,
+                )
 
         return success_result()
 
@@ -733,13 +758,82 @@ class FragmentClient:
         confirm_method = link_result.get("confirm_method")
         confirm_params = link_result.get("confirm_params", {})
         if confirm_method:
-            await self._api_request(confirm_method, {
+            confirm_result = await self._api_request(confirm_method, {
                 "account": json.dumps(self._account),
                 "device": json.dumps(self._device),
                 "boc": boc,
                 **confirm_params,
             })
+            if confirm_result.get("error"):
+                return error_result(
+                    f"Транзакция отправлена, но Fragment отклонил покупку: {confirm_result['error']}",
+                    default_code=FragmentPaymentError,
+                )
         return success_result()
+
+    async def _buy_item(self, slug: str, item_path: str, bid_type: int, bid_amount) -> PaymentResult:
+        """Internal: load page context, connect wallet, call getBidLink, broadcast tx."""
+        await self._load_item_context(slug, item_path)
+        await self.connect_wallet()
+
+        link_result = await self._get_link_with_reconnect("getBidLink", {
+            "type": bid_type,
+            "username": slug,
+            "bid": str(bid_amount),
+        })
+        if link_result.get("need_verify"):
+            return error_result(FragmentAuthError("Fragment requires an authorized Telegram session cookie on fragment.com."))
+        if link_result.get("error"):
+            return error_result(link_result["error"], default_code=FragmentPaymentError)
+
+        transaction = link_result["transaction"]
+        amount = int(transaction["messages"][0]["amount"])
+        await self._check_balance(amount)
+        boc = await (self._sign_and_broadcast_v5(transaction) if self.wallet_version == WALLET_V5R1
+                     else self._sign_and_broadcast_v4(transaction))
+
+        confirm_method = link_result.get("confirm_method")
+        confirm_params = link_result.get("confirm_params", {})
+        if confirm_method:
+            confirm_result = await self._api_request(confirm_method, {
+                "account": json.dumps(self._account),
+                "device": json.dumps(self._device),
+                "boc": boc,
+                **confirm_params,
+            })
+            if confirm_result.get("error"):
+                return error_result(
+                    f"Транзакция отправлена, но Fragment отклонил: {confirm_result['error']}",
+                    default_code=FragmentPaymentError,
+                )
+        return success_result()
+
+    async def buy_number(self, number_slug: str, bid_amount) -> PaymentResult:
+        """Bid on / buy a Fragment anonymous phone number.
+
+        number_slug: the slug from the URL, e.g. "+79991234567" or "anonymous-number-xxx".
+        bid_amount: amount in TON (float or int).
+        """
+        return await self._buy_item(number_slug, "number", 3, bid_amount)
+
+    async def buy_username(self, username_slug: str, bid_amount) -> PaymentResult:
+        """Bid on / buy a Fragment Telegram username.
+
+        username_slug: the username without @, e.g. "coolname".
+        bid_amount: amount in TON.
+        """
+        return await self._buy_item(username_slug, "username", 1, bid_amount)
+
+    async def get_item_auction_info(self, slug: str, item_type: str) -> dict:
+        """Fetch live auction info for a gift/number/username from its Fragment page.
+
+        Returns a dict with keys: current_bid, min_next_bid, buy_now_price,
+        auction_end (unix ts), name, image_url, url.  All values may be None/0.0
+        if Fragment's markup doesn't match expected patterns.
+        """
+        from .catalog import FragmentCatalog
+        catalog = FragmentCatalog(fragment_cookies=self.fragment_cookies)
+        return await catalog.get_auction_info(slug, item_type)
 
     async def transfer_gift(self, owned_item_slug: str, recipient_username: str, anonymous: bool = True) -> PaymentResult:
         """Передаёт УЖЕ купленный (лежащий на этом аккаунте) подарок другому @username.
@@ -789,12 +883,17 @@ class FragmentClient:
         confirm_method = link_result.get("confirm_method")
         confirm_params = link_result.get("confirm_params", {})
         if confirm_method:
-            await self._api_request(confirm_method, {
+            confirm_result = await self._api_request(confirm_method, {
                 "account": json.dumps(self._account),
                 "device": json.dumps(self._device),
                 "boc": boc,
                 **confirm_params,
             })
+            if confirm_result.get("error"):
+                return error_result(
+                    f"Транзакция отправлена, но Fragment отклонил передачу: {confirm_result['error']}",
+                    default_code=FragmentPaymentError,
+                )
         return success_result()
 
     async def buy_and_deliver_gift(self, item_slug: str, bid_amount, recipient_username: str, anonymous: bool = True) -> PaymentResult:
@@ -873,6 +972,107 @@ class FragmentClient:
             if not prices:
                 raise FragmentError("CoinGecko не вернул курс TON")
             return {"usd": float(prices["usd"]), "rub": float(prices["rub"])}
+
+    async def list_my_gifts(self, limit: int = 50) -> list[dict]:
+        """Lists Fragment NFT gifts owned by this wallet via TonCenter v3 NFT API.
+
+        Returns dicts with keys: slug, nft_address, collection, number, name,
+        price_ton (0.0), image_url, url, status ('owned').
+        nft_address is the TON contract address needed for transfer_gift_to_address().
+        """
+        from .catalog import gift_image_url, FRAGMENT_BASE as _FB
+
+        session = await self._get_session()
+        url = "https://toncenter.com/api/v3/nft/items"
+        params = {"owner_address": self.wallet_address, "limit": limit, "offset": 0}
+        headers = {"X-API-Key": self.toncenter_api_key} if self.toncenter_api_key else {}
+
+        async with session.get(url, params=params, headers=headers, timeout=REQUEST_TIMEOUT) as resp:
+            if resp.status != 200:
+                raise FragmentWalletError(f"TonCenter NFT API: HTTP {resp.status}")
+            data = await resp.json()
+
+        items = []
+        for nft in data.get("nft_items", []):
+            meta = nft.get("metadata") or {}
+            name = meta.get("name") or ""
+            external_url = meta.get("external_url") or ""
+            nft_address = nft.get("address") or ""
+            col = nft.get("collection") or {}
+            col_name = col.get("name") or ""
+
+            if "fragment.com/gift/" not in external_url:
+                continue
+
+            slug = external_url.rsplit("/gift/", 1)[-1].strip("/")
+            num_match = re.search(r"-(\d+)$", slug)
+            number = int(num_match.group(1)) if num_match else 0
+            image_url = meta.get("image") or gift_image_url(slug)
+
+            items.append({
+                "slug": slug,
+                "nft_address": nft_address,
+                "collection": col_name,
+                "number": number,
+                "name": name,
+                "price_ton": 0.0,
+                "image_url": image_url,
+                "url": external_url,
+                "status": "owned",
+            })
+
+        return items
+
+    async def transfer_gift_to_address(self, nft_address: str, new_owner_address: str) -> PaymentResult:
+        """Transfer an owned Fragment NFT gift to any TON wallet address (TEP-62 standard).
+
+        nft_address: TON contract address of the NFT item (from list_my_gifts()).
+        new_owner_address: destination TON address (EQ..., UQ..., or 0:hex).
+        """
+        if not nft_address:
+            raise FragmentWalletError("nft_address обязателен для передачи на TON-адрес")
+
+        try:
+            from pytoniq_core import Address as TonAddress, Builder
+        except ImportError:
+            raise FragmentWalletError("pytoniq-core обязателен для передачи на TON-адрес")
+
+        TRANSFER_OP = 0x5fcc3d14
+        FORWARD_NANOTONS = int(0.05 * 1_000_000_000)
+        TOTAL_NANOTONS = int(0.15 * 1_000_000_000)  # 0.1 TON газ + 0.05 TON forward
+
+        try:
+            dest = TonAddress(new_owner_address)
+            resp_dest = TonAddress(self.wallet_address)
+        except Exception as e:
+            raise FragmentWalletError(f"Неверный TON-адрес: {e}")
+
+        b = Builder()
+        b.store_uint(TRANSFER_OP, 32)   # op: transfer
+        b.store_uint(0, 64)              # query_id
+        b.store_address(dest)            # new_owner
+        b.store_address(resp_dest)       # response_destination (вернуть лишний газ)
+        b.store_bit(0)                   # no custom_payload
+        b.store_coins(FORWARD_NANOTONS)  # forward_amount
+        b.store_bit(0)                   # no forward_payload
+        cell = b.end_cell()
+
+        await self._check_balance(TOTAL_NANOTONS, gas_buffer_ton=0.02)
+
+        transaction = {
+            "messages": [{
+                "address": nft_address,
+                "amount": str(TOTAL_NANOTONS),
+                "payload": base64.b64encode(cell.to_boc()).decode(),
+            }]
+        }
+
+        if self.wallet_version == WALLET_V5R1:
+            await self._sign_and_broadcast_v5(transaction)
+        else:
+            await self._sign_and_broadcast_v4(transaction)
+
+        return success_result()
 
     async def get_balance(self) -> BalanceResult:
         """Баланс кошелька в TON + конвертация в USD и RUB. Никогда не бросает исключение."""
